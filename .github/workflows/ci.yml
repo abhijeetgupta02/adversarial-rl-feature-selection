@@ -8,5 +8,6 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --frozen
       - run: uv run ruff check .
+      - run: uv run mypy
       - run: uv run pytest
       - run: make reproduce-smoke

@@ -34,3 +34,22 @@ make test
 make reproduce-smoke
 make reproduce-results
 ```
+
+## Development
+
+```bash
+make test       # uv run pytest
+make lint       # uv run ruff check .
+make typecheck  # uv run mypy
+```
+
+`tests/` covers the information measures, imposter injection (including the
+unsupported-noise error path and in-range vs out-of-range uniform support), the
+deterministic fixtures, descriptor construction, and the artifact writers.
+
+`robustfeatures.core.mutual_information(x, y)` is also available as an
+information-theoretic descriptor. It returns a non-negative plug-in estimate of
+`I(X;Y)` (the KL divergence between the joint histogram and the product of its
+marginals) for relevance/redundancy framing. It is provided as a standalone
+helper and is intentionally not wired into `evaluate`, so the reconstructed
+metrics in `reports/latest/` are unchanged.

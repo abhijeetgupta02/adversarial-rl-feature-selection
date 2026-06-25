@@ -69,6 +69,27 @@ def kl_divergence(left: np.ndarray, right: np.ndarray, bins: int = 20) -> float:
     return float(np.sum(p * np.log(p / q)))
 
 
+def mutual_information(left: np.ndarray, right: np.ndarray, bins: int = 12) -> float:
+    """Plug-in mutual information I(X;Y) from a shared 2D histogram.
+
+    Equivalent to H(X) + H(Y) - H(X, Y) when all terms use the joint histogram's
+    consistent marginals; computed as the KL divergence between the joint and the
+    product of marginals, so the estimate is always non-negative. In the
+    feature-relevance/redundancy framing this measures how much information a
+    feature shares with another, complementing the entropy/joint-entropy/KL
+    descriptors. See information-theoretic feature-selection literature
+    (e.g. https://arxiv.org/pdf/1408.1487).
+    """
+    counts, _, _ = np.histogram2d(left, right, bins=bins)
+    total = counts.sum()
+    if total == 0:
+        return 0.0
+    joint = counts / total
+    outer = np.outer(joint.sum(axis=1), joint.sum(axis=0))
+    mask = (joint > 0) & (outer > 0)
+    return float(np.sum(joint[mask] * np.log(joint[mask] / outer[mask])))
+
+
 def synthetic_observations(spec: EnvironmentSpec, samples: int, seed: int) -> np.ndarray:
     """Deterministic trajectory fixture preserving each paper environment's dimensionality."""
     rng = np.random.default_rng(seed)
@@ -99,7 +120,9 @@ def inject_imposters(
     ]
 
 
-def feature_descriptors(observations: np.ndarray, labels: np.ndarray, windows: int = 12):
+def feature_descriptors(
+    observations: np.ndarray, labels: np.ndarray, windows: int = 12
+) -> pd.DataFrame:
     rows = []
     for window in np.array_split(observations, windows):
         feature_entropies = np.array([entropy(window[:, index]) for index in range(window.shape[1])])
@@ -141,8 +164,8 @@ def models(seed: int = 7):
 
 
 def evaluate(samples: int = 3600, seed: int = 7) -> tuple[list[dict], pd.DataFrame]:
-    records = []
-    prediction_rows = []
+    records: list[dict] = []
+    prediction_rows: list[dict] = []
     metric_columns = {
         "entropy": ["mean_entropy", "centered_entropy", "entropy"],
         "joint_entropy": ["mean_entropy", "centered_entropy", "joint_entropy"],
@@ -200,28 +223,26 @@ def benchmark_diagnostics(records: list[dict]) -> pd.DataFrame:
     rows = []
     for environment, env_summary in summary.groupby("environment", sort=True):
         local_best = env_summary.iloc[0]
-        published_rows = [
-            {
-                "model": model,
-                "metric": metric,
-                "accuracy": accuracy,
-            }
-            for model, metrics in PUBLISHED_RESULTS[environment].items()
-            for metric, accuracy in metrics.items()
-        ]
-        published_best = max(published_rows, key=lambda row: row["accuracy"])
+        published_best_model, published_best_metric, published_best_accuracy = max(
+            (
+                (model, metric, accuracy)
+                for model, metrics in PUBLISHED_RESULTS[environment].items()
+                for metric, accuracy in metrics.items()
+            ),
+            key=lambda row: row[2],
+        )
         rows.append(
             {
                 "environment": environment,
                 "local_best_model": local_best["model"],
                 "local_best_metric": local_best["metric"],
                 "local_best_accuracy": float(local_best["accuracy"]),
-                "published_best_model": published_best["model"],
-                "published_best_metric": published_best["metric"],
-                "published_best_accuracy": float(published_best["accuracy"]),
+                "published_best_model": published_best_model,
+                "published_best_metric": published_best_metric,
+                "published_best_accuracy": float(published_best_accuracy),
                 "ranking_agrees_with_published": bool(
-                    local_best["model"] == published_best["model"]
-                    and local_best["metric"] == published_best["metric"]
+                    local_best["model"] == published_best_model
+                    and local_best["metric"] == published_best_metric
                 ),
                 "local_accuracy_range": float(
                     env_summary["accuracy"].max() - env_summary["accuracy"].min()
