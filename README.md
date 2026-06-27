@@ -53,3 +53,24 @@ information-theoretic descriptor. It returns a non-negative plug-in estimate of
 marginals) for relevance/redundancy framing. It is provided as a standalone
 helper and is intentionally not wired into `evaluate`, so the reconstructed
 metrics in `reports/latest/` are unchanged.
+
+### Diagnostic helpers
+
+Three further standalone helpers support descriptor tuning and accuracy
+context. They are likewise **not** wired into `evaluate`, so the metrics in
+`reports/latest/` are unchanged:
+
+- `sturges_bins(n)` and `freedman_diaconis_bins(values)` estimate a histogram
+  bin count via Sturges' rule (`ceil(log2(n)) + 1`) and the
+  outlier-robust Freedman–Diaconis rule (`h = 2·IQR / n^(1/3)`). Both match
+  NumPy's own `histogram_bin_edges(..., bins="sturges"|"fd")` and let you probe
+  whether the fixed `bins=20`/`bins=12` defaults under- or over-bin a given
+  feature.
+- `majority_class_baseline(labels)` returns the trivial "always predict the
+  most frequent label" accuracy floor (the
+  `DummyClassifier(strategy="most_frequent")` baseline) that any detector must
+  beat.
+
+`feature_descriptors` now validates `windows`: a value below `1` or above the
+number of observation rows raises a clear `ValueError` instead of failing later
+with an opaque zero-size reduction.

@@ -90,6 +90,51 @@ def mutual_information(left: np.ndarray, right: np.ndarray, bins: int = 12) -> f
     return float(np.sum(joint[mask] * np.log(joint[mask] / outer[mask])))
 
 
+def sturges_bins(n: int) -> int:
+    """Sturges' rule for histogram bin count: ``ceil(log2(n)) + 1``.
+
+    Sturges (1926) assumes an approximately normal sample and tends to
+    under-bin large or skewed samples, but it is a cheap, parameter-free
+    default. Matches ``numpy.histogram_bin_edges(x, bins="sturges")``.
+
+    Provided as a standalone descriptor-tuning helper; it is intentionally
+    NOT wired into :func:`entropy`/:func:`evaluate`, so the reconstructed
+    metrics in ``reports/latest/`` are unchanged. See
+    https://en.wikipedia.org/wiki/Sturges%27s_rule and the NumPy histogram
+    bin-estimator docs.
+    """
+    if n < 1:
+        raise ValueError(f"n must be >= 1, got {n}")
+    return int(np.ceil(np.log2(n))) + 1
+
+
+def freedman_diaconis_bins(values: np.ndarray) -> int:
+    """Freedman-Diaconis histogram bin count from the interquartile range.
+
+    Bin width ``h = 2 * IQR(x) / n**(1/3)`` (Freedman & Diaconis, 1981);
+    the count is ``ceil((max - min) / h)``. Using the IQR instead of the
+    standard deviation makes it robust to the heavy tails / outliers common
+    in injected-imposter feature distributions, unlike Scott's rule. On
+    degenerate input (zero IQR or zero range, e.g. a constant feature) it
+    falls back to a single bin. Matches ``numpy.histogram_bin_edges(x,
+    bins="fd")`` on non-degenerate data.
+
+    Standalone helper, intentionally NOT wired into the default
+    entropy/KL descriptors, so reconstructed metrics are unchanged. See
+    https://en.wikipedia.org/wiki/Freedman%E2%80%93Diaconis_rule.
+    """
+    flat = np.asarray(values, dtype=float).ravel()
+    if flat.size < 1:
+        raise ValueError("values must be non-empty")
+    quartiles = np.percentile(flat, [75, 25])
+    iqr = float(quartiles[0] - quartiles[1])
+    span = float(flat.max() - flat.min())
+    width = 2.0 * iqr / (flat.size ** (1.0 / 3.0))
+    if width <= 0.0 or span <= 0.0:
+        return 1
+    return int(np.ceil(span / width))
+
+
 def synthetic_observations(spec: EnvironmentSpec, samples: int, seed: int) -> np.ndarray:
     """Deterministic trajectory fixture preserving each paper environment's dimensionality."""
     rng = np.random.default_rng(seed)
@@ -123,6 +168,16 @@ def inject_imposters(
 def feature_descriptors(
     observations: np.ndarray, labels: np.ndarray, windows: int = 12
 ) -> pd.DataFrame:
+    if windows < 1:
+        raise ValueError(f"windows must be >= 1, got {windows}")
+    n_samples = observations.shape[0]
+    if n_samples < windows:
+        raise ValueError(
+            f"windows ({windows}) exceeds the number of observation rows "
+            f"({n_samples}); each window must hold at least one row or the "
+            "entropy/KL descriptors hit a zero-size reduction. Use "
+            "windows <= n_samples."
+        )
     rows = []
     for window in np.array_split(observations, windows):
         feature_entropies = np.array([entropy(window[:, index]) for index in range(window.shape[1])])
@@ -161,6 +216,26 @@ def models(seed: int = 7):
         "knn": KNeighborsClassifier(n_neighbors=5),
         "svm": SVC(kernel="rbf", C=10, gamma="scale"),
     }
+
+
+def majority_class_baseline(labels: np.ndarray) -> float:
+    """Accuracy floor of always predicting the most frequent label.
+
+    This is the "most_frequent"/"zero rule" baseline (equivalent to
+    ``sklearn.dummy.DummyClassifier(strategy="most_frequent")``) and gives
+    the trivial accuracy any detector must beat. With the descriptor matrix's
+    -1 (original) vs +1 (imposter) labels and many more originals than
+    imposters, this floor can be high, so reporting it alongside the four
+    detector families contextualizes their accuracy. Deterministic and
+    standalone: NOT wired into :func:`evaluate`, so reconstructed metrics are
+    unchanged. See
+    https://scikit-learn.org/stable/modules/generated/sklearn.dummy.DummyClassifier.html
+    """
+    flat = np.asarray(labels).ravel()
+    if flat.size == 0:
+        raise ValueError("labels must be non-empty")
+    _, counts = np.unique(flat, return_counts=True)
+    return float(counts.max()) / float(flat.size)
 
 
 def evaluate(samples: int = 3600, seed: int = 7) -> tuple[list[dict], pd.DataFrame]:
